@@ -65,34 +65,6 @@ async def initialize_mcp_tool(tool_cls, tool_config) -> list:
     return tool_list
 
 
-# Config keys that should be coerced to int when overridden via env vars
-_INT_CONFIG_KEYS = frozenset({"num_workers", "rate_limit", "timeout", "topk"})
-
-# Config keys that should be coerced to bool when overridden via env vars
-_BOOL_CONFIG_KEYS = frozenset({"enable_global_rate_limit"})
-
-
-def _apply_env_overrides(config: dict) -> dict:
-    """Apply VERL_TOOL_OVERRIDE_* environment variables to tool config.
-
-    For each key in config, checks for VERL_TOOL_OVERRIDE_<UPPERCASE_KEY>.
-    If set, overrides the value. Integers and booleans are coerced appropriately.
-    """
-    result = dict(config)
-    for key in list(result.keys()):
-        env_name = f"VERL_TOOL_OVERRIDE_{key.upper()}"
-        env_val = os.environ.get(env_name)
-        if env_val is not None and env_val != "":
-            if key in _INT_CONFIG_KEYS:
-                result[key] = int(env_val)
-            elif key in _BOOL_CONFIG_KEYS:
-                result[key] = env_val.lower() in ("true", "1", "yes")
-            else:
-                result[key] = env_val
-            logger.debug("Tool config override: %s=%s (from %s)", key, result[key], env_name)
-    return result
-
-
 def get_tool_class(cls_name):
     module_name, class_name = cls_name.rsplit(".", 1)
     if module_name not in sys.modules:
@@ -112,17 +84,6 @@ def initialize_tools_from_config(tools_config_file):
 
     Supports both NATIVE and MCP tool types. For MCP tools, a temporary event loop
     is created only when needed and properly closed after use to prevent memory leaks.
-
-    Environment variable overrides: For NATIVE tools, config values can be overridden
-    without editing the YAML by setting VERL_TOOL_OVERRIDE_<KEY>=<value>. Example::
-
-        VERL_TOOL_OVERRIDE_RETRIEVAL_SERVICE_URL=http://my-server:9000/retrieve
-        VERL_TOOL_OVERRIDE_NUM_WORKERS=60
-        VERL_TOOL_OVERRIDE_RATE_LIMIT=60
-        VERL_TOOL_OVERRIDE_TIMEOUT=60
-
-    Keys like num_workers, rate_limit, timeout, topk are coerced to int.
-    Keys like enable_global_rate_limit are coerced to bool.
     """
     tools_config = OmegaConf.load(tools_config_file)
     tool_list = []
@@ -159,10 +120,8 @@ def initialize_tools_from_config(tools_config_file):
                     else:
                         tool_schema_dict = OmegaConf.to_container(tool_config.tool_schema, resolve=True)
                         tool_schema = OpenAIFunctionToolSchema.model_validate(tool_schema_dict)
-                    config = OmegaConf.to_container(tool_config.config, resolve=True)
-                    config = _apply_env_overrides(config)
                     tool = tool_cls(
-                        config=config,
+                        config=OmegaConf.to_container(tool_config.config, resolve=True),
                         tool_schema=tool_schema,
                     )
                     tool_list.append(tool)
