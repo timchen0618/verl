@@ -8,7 +8,6 @@ ulimit -n 65535
 PROJECT_DIR="$(pwd)"
 CONFIG_PATH="$PROJECT_DIR/examples/sglang_multiturn/config"
 
-
 TRAIN_DATA="/scratch/hc3337/projects/Search-R1/data/qampari/train_base.parquet"
 VAL_DATA="/scratch/hc3337/projects/Search-R1/data/qampari/test_base.parquet"
 
@@ -17,6 +16,9 @@ TOOL_CONFIG="$CONFIG_PATH/tool_config/search_tool_config.yaml"
 MAX_TURNS=5
 NUM_GPUS_PER_NODE=2
 NUM_EPOCHS=8
+GPU_MEMORY_UTILIZATION=0.8
+
+EXP_NAME="qampari_qwen2.5-3b-instruct_contriever_finetuned_${MAX_TURNS}turns"
 
 python3 -m verl.trainer.main_ppo \
     --config-path="$CONFIG_PATH" \
@@ -46,7 +48,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=1 \
     actor_rollout_ref.rollout.name=sglang \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.8 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=$GPU_MEMORY_UTILIZATION \
     actor_rollout_ref.rollout.n=5 \
     actor_rollout_ref.rollout.multi_turn.max_assistant_turns=$MAX_TURNS \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
@@ -56,7 +58,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.val_before_train=False \
     trainer.logger='["console","wandb"]' \
     trainer.project_name='search_r1_like_async_rl' \
-    trainer.experiment_name='qwen2.5-3b-instruct_function_rm-search-async-sgl-multi-w-searchtool-verify-n16' \
+    trainer.experiment_name=$EXP_NAME \
     trainer.n_gpus_per_node=$NUM_GPUS_PER_NODE \
     trainer.nnodes=1 \
     trainer.save_freq=100 \
