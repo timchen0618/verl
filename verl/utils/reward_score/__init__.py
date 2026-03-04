@@ -98,6 +98,8 @@ def default_compute_score(
         "searchR1_2wikimultihopqa",
         "searchR1_musique",
         "searchR1_bamboogle",
+        "musique",
+        "qampari",
     ]:
         from . import search_r1_like_qa_em
 
