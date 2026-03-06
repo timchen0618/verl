@@ -15,6 +15,7 @@
 
 import json
 import logging
+import os
 import threading
 import time
 import traceback
@@ -29,6 +30,7 @@ INITIAL_RETRY_DELAY = 1
 API_TIMEOUT = 10
 
 logger = logging.getLogger(__name__)
+logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
 def call_search_api(
@@ -136,12 +138,26 @@ def call_search_api(
 
 
 def _passages2string(retrieval_result):
-    """Convert retrieval results to formatted string."""
+    """Convert retrieval results to formatted string.
+
+    Supports multiple document formats:
+    - document.contents (title\\ntext, used by Search-R1 BM25 and wiki-18)
+    - document.text + document.title
+    - document with contents at top level
+    """
     format_reference = ""
     for idx, doc_item in enumerate(retrieval_result):
-        content = doc_item["document"]["contents"]
-        title = content.split("\n")[0]
-        text = "\n".join(content.split("\n")[1:])
+        doc = doc_item.get("document", doc_item)
+        content = doc.get("contents") or doc.get("text")
+        if content is None:
+            content = str(doc)
+        if isinstance(content, str):
+            parts = content.split("\n", 1)
+            title = parts[0].strip('"') if parts else ""
+            text = parts[1] if len(parts) > 1 else content
+        else:
+            title = doc.get("title", "")
+            text = str(content)
         format_reference += f"Doc {idx + 1} (Title: {title})\n{text}\n\n"
     return format_reference.strip()
 

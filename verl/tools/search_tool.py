@@ -105,9 +105,15 @@ def init_search_execution_pool(
 ):
     """Initialize search execution pool."""
     if mode == PoolMode.ThreadMode:
+        # Propagate VERL_LOGGING_LEVEL to Ray worker so search logs are visible
+        runtime_env = {
+            "env_vars": {
+                "VERL_LOGGING_LEVEL": os.environ.get("VERL_LOGGING_LEVEL", "WARN"),
+            }
+        }
         return (
             ray.remote(SearchExecutionWorker)
-            .options(max_concurrency=num_workers)
+            .options(max_concurrency=num_workers, runtime_env=runtime_env)
             .remote(enable_global_rate_limit=enable_global_rate_limit, rate_limit=rate_limit)
         )
     else:
