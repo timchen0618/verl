@@ -15,7 +15,7 @@ VAL_DATA="/scratch/hc3337/projects/Search-R1/data/musique/test_base.parquet"
 TOOL_CONFIG="$CONFIG_PATH/tool_config/search_tool_config.yaml"
 
 MAX_TURNS=5
-NUM_GPUS_PER_NODE=4
+NUM_GPUS_PER_NODE=2
 NUM_EPOCHS=15
 GPU_MEMORY_UTILIZATION=0.8
 
