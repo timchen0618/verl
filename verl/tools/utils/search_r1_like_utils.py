@@ -75,6 +75,14 @@ def call_search_api(
                 timeout=timeout,
             )
 
+            # Log 4xx client errors (e.g. 422 from API format mismatch) for debugging
+            if 400 <= response.status_code < 500:
+                last_error = (
+                    f"{log_prefix}API Request Error: Client Error ({response.status_code}) - {response.text[:300]}"
+                )
+                logger.warning(last_error)
+                break
+
             # Check for Gateway Timeout (504) and other server errors for retrying
             if response.status_code in [500, 502, 503, 504]:
                 last_error = (
