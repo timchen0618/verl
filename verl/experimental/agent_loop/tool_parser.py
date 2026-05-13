@@ -98,12 +98,24 @@ class HermesToolParser(ToolParser):
                 name, arguments = function_call["name"], function_call["arguments"]
                 function_calls.append(FunctionCall(name=name, arguments=json.dumps(arguments, ensure_ascii=False)))
             except Exception as e:
-                logger.error(f"Failed to decode tool call: {e}")
+                logger.error(
+                    f"Failed to decode tool call: {e} | raw content between <tool_call> and </tool_call>: {match!r}"
+                )
+                function_calls.append(
+                    FunctionCall(name="__malformed_tool_call__", arguments=json.dumps({"raw": match}))
+                )
 
         # remaing text exclude tool call tokens
         content = self.tool_call_regex.sub("", text)
 
         return content, function_calls
+
+
+@ToolParser.register("qwen")
+class QwenToolParser(HermesToolParser):
+    """Qwen models use the same <tool_call>...</tool_call> XML format as Hermes."""
+
+    pass
 
 
 @ToolParser.register("gpt-oss")

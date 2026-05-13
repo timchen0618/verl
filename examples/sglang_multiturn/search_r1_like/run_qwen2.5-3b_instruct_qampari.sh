@@ -5,6 +5,10 @@ set -x
 
 ulimit -n 65535
 
+# Enable search/retrieval logging (url, payload, outputs). Use DEBUG for full API response.
+export VERL_LOGGING_LEVEL="${VERL_LOGGING_LEVEL:-INFO}"
+export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
+
 PROJECT_DIR="$(pwd)"
 CONFIG_PATH="$PROJECT_DIR/examples/sglang_multiturn/config"
 
@@ -66,5 +70,6 @@ python3 -m verl.trainer.main_ppo \
     data.train_files="$TRAIN_DATA" \
     data.val_files="$VAL_DATA"  \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG" \
+    actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
     trainer.total_epochs=$NUM_EPOCHS $@ 
 

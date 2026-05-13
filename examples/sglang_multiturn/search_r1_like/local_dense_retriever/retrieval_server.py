@@ -355,9 +355,13 @@ def retrieve_endpoint(request: QueryRequest):
         request.topk = config.retrieval_topk  # fallback to default
 
     # Perform batch retrieval
-    results, scores = retriever.batch_search(
+    search_output = retriever.batch_search(
         query_list=request.queries, num=request.topk, return_score=request.return_scores
     )
+    if request.return_scores:
+        results, scores = search_output
+    else:
+        results, scores = search_output, None
 
     # Format response
     resp = []
@@ -390,6 +394,7 @@ if __name__ == "__main__":
         "--retriever_model", type=str, default="intfloat/e5-base-v2", help="Path of the retriever model."
     )
     parser.add_argument("--faiss_gpu", action="store_true", help="Use GPU for computation")
+    parser.add_argument("--port", type=int, default=8000, help="Port to listen on.")
 
     args = parser.parse_args()
 
@@ -412,4 +417,4 @@ if __name__ == "__main__":
     retriever = get_retriever(config)
 
     # 3) Launch the server. By default, it listens on http://127.0.0.1:8000
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=args.port)

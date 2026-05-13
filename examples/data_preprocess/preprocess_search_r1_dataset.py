@@ -24,13 +24,18 @@ from huggingface_hub.utils import EntryNotFoundError
 
 from verl.utils.hdfs_io import copy, makedirs
 
+try:
+    from datasets import load_dataset
+except ImportError:
+    load_dataset = None
+
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 # Configuration constants
 DEFAULT_SYSTEM_CONTENT = "You are a helpful and harmless assistant."
-DEFAULT_USER_CONTENT_PREFIX = (
+DEFAULT_USER_CONTENT_PREFIX_LEGACY = (
     "Answer the given question. You must conduct reasoning inside <think> and </think> "
     "first every time you get new information. After reasoning, if you find you lack "
     "some knowledge, you can call a search engine by <tool_call> query </tool_call> "
@@ -41,48 +46,41 @@ DEFAULT_USER_CONTENT_PREFIX = (
     "<answer> Beijing </answer>. Question: "
 )
 
+DEFAULT_USER_CONTENT_PREFIX = (
+    "Answer the given question. You must conduct reasoning inside <think> and </think> "
+    "first every time you get new information. After reasoning, if you find you lack "
+    "some knowledge, you can use the search tool to look up relevant information. "
+    "You can search as many times as you want. If you find no further external knowledge "
+    "needed, you can directly provide the answer inside <answer> and </answer>, without "
+    "detailed illustrations. For example, <answer> Beijing </answer>. Question: "
+)
+  
 
-def process_single_row(row, current_split_name, row_index):
-    """
-    Process a single row of data for SearchR1-like format.
 
-    Args:
-        row: DataFrame row containing the original data
-        current_split_name: Name of the current split (train/test)
-        row_index: Index of the row in the DataFrame
-
-    Returns:
-        pd.Series: Processed row data in the required format
-    """
+def process_row(row, split_name, row_index, system_content, user_content_prefix):
+    """Process a single row into SearchR1-like format."""
     question = row.get("question", "")
-
-    # Build prompt structure
     user_content = user_content_prefix.rstrip("\n") + question
     prompt = [{"role": "system", "content": system_content}, {"role": "user", "content": user_content}]
 
-    # Extract ground truth from reward_model or fallback to golden_answers
     reward_model_data = row.get("reward_model")
     if isinstance(reward_model_data, dict) and "ground_truth" in reward_model_data:
-        ground_truth = reward_model_data.get("ground_truth")
+        ground_truth = (reward_model_data.get("ground_truth"))
     else:
-        ground_truth = row.get("golden_answers", [])
+        ground_truth = (row.get("golden_answers"))
+        reward_model_data = {'ground_truth': {'target': ground_truth}} 
 
-    # Process data source
     data_source_tagged = "searchR1_" + str(row.get("data_source", ""))
-
-    # Build tools kwargs structure
     tools_kwargs = {
         "search": {
             "create_kwargs": {"ground_truth": ground_truth, "question": question, "data_source": data_source_tagged}
         }
     }
-
-    # Build complete extra_info structure
     extra_info = {
         "index": row_index,
         "need_tools_kwargs": True,
         "question": question,
-        "split": current_split_name,
+        "split": split_name,
         "tools_kwargs": tools_kwargs,
     }
 
@@ -98,81 +96,87 @@ def process_single_row(row, current_split_name, row_index):
     )
 
 
-def main():
+def iter_splits_and_rows(args):
+    """Yield (split_name, rows) for each data split. rows are dict-like."""
+    if args.dataset_source == "flashrag":
+        if load_dataset is None:
+            raise ImportError("FlashRAG requires 'datasets'. Install with: pip install datasets")
+        subset = args.flashrag_subset
+        logger.info(f"Loading RUC-NLPIR/FlashRAG_datasets ({subset})...")
+        dataset = load_dataset("RUC-NLPIR/FlashRAG_datasets", subset)
+        for split_name in dataset.keys():
+            rows = []
+            for i, ex in enumerate(dataset[split_name]):
+                rows.append({
+                    "question": ex["question"],
+                    "golden_answers": (ex.get("golden_answers")),
+                    "data_source": f"flashrag_{subset}",
+                    "ability": ex.get("ability"),
+                    "metadata": ex.get("metadata"),
+                })
+            yield split_name, rows
+    else:
+        with tempfile.TemporaryDirectory() as tmp:
+            for split in ["train", "test"]:
+                parquet_path = f"{split}.parquet"
+                try:
+                    logger.info(f"Downloading {parquet_path} from {args.hf_repo_id}")
+                    local_path = hf_hub_download(
+                        repo_id=args.hf_repo_id,
+                        filename=parquet_path,
+                        repo_type="dataset",
+                        local_dir=tmp,
+                        local_dir_use_symlinks=False,
+                    )
+                    df = pd.read_parquet(local_path)
+                    logger.info(f"Loaded {len(df)} rows from {parquet_path}")
+                    yield split, [df.loc[i] for i in range(len(df))]
+                except EntryNotFoundError:
+                    logger.warning(f"{parquet_path} not found in {args.hf_repo_id}")
+                except Exception as e:
+                    logger.error(f"Error processing {split}: {e}")
+
+
+def main(args, system_content, user_content_prefix):
     local_save_dir = os.path.expanduser(args.local_dir)
     os.makedirs(local_save_dir, exist_ok=True)
 
     processed_files = []
-
-    # Download and process files using temporary directory
-    with tempfile.TemporaryDirectory() as tmp_download_dir:
-        for split in ["train", "test"]:
-            parquet_filename = f"{split}.parquet"
-            logger.info(f"Processing {split} split...")
-
-            try:
-                # Download Parquet file from HuggingFace
-                logger.info(f"Downloading {parquet_filename} from {args.hf_repo_id}")
-                local_parquet_filepath = hf_hub_download(
-                    repo_id=args.hf_repo_id,
-                    filename=parquet_filename,
-                    repo_type="dataset",
-                    local_dir=tmp_download_dir,
-                    local_dir_use_symlinks=False,
-                )
-
-                # Load and process Parquet file
-                df_raw = pd.read_parquet(local_parquet_filepath)
-                logger.info(f"Loaded {len(df_raw)} rows from {parquet_filename}")
-
-                def apply_process_row(row, split_name=split):
-                    return process_single_row(row, current_split_name=split_name, row_index=row.name)
-
-                df_processed = df_raw.apply(apply_process_row, axis=1)
-
-                # Save processed DataFrame
-                output_file_path = os.path.join(local_save_dir, f"{split}.parquet")
-                df_processed.to_parquet(output_file_path, index=False)
-                logger.info(f"Saved {len(df_processed)} processed rows to {output_file_path}")
-                processed_files.append(output_file_path)
-
-            except EntryNotFoundError:
-                logger.warning(f"{parquet_filename} not found in repository {args.hf_repo_id}")
-            except Exception as e:
-                logger.error(f"Error processing {split} split: {e}")
+    for split_name, rows in iter_splits_and_rows(args):
+        df = pd.DataFrame(
+            process_row(row, split_name, i, system_content, user_content_prefix) for i, row in enumerate(rows)
+        )
+        out_path = os.path.join(local_save_dir, f"{split_name}.parquet")
+        df.to_parquet(out_path, index=False)
+        logger.info(f"Saved {len(df)} rows to {out_path}")
+        processed_files.append(out_path)
 
     if not processed_files:
-        logger.warning("No data was processed or saved")
+        logger.warning("No data was processed")
         return
 
-    logger.info(f"Successfully processed {len(processed_files)} files to {local_save_dir}")
-
-    # Copy to HDFS if specified
+    logger.info(f"Processed {len(processed_files)} files to {local_save_dir}")
     if args.hdfs_dir:
         try:
             makedirs(args.hdfs_dir)
             copy(src=local_save_dir, dst=args.hdfs_dir)
-            logger.info(f"Successfully copied files to HDFS: {args.hdfs_dir}")
+            logger.info(f"Copied to HDFS: {args.hdfs_dir}")
         except Exception as e:
-            logger.error(f"Error copying files to HDFS: {e}")
+            logger.error(f"Error copying to HDFS: {e}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Download Search-R1 from HuggingFace, process, and save to Parquet.")
     parser.add_argument(
-        "--hf_repo_id", default="PeterJinGo/nq_hotpotqa_train", help="HuggingFace dataset repository ID."
+        "--dataset_source",
+        choices=["hf_parquet", "flashrag"],
+        default="hf_parquet",
+        help="'hf_parquet': train/test.parquet from --hf_repo_id; 'flashrag': RUC-NLPIR/FlashRAG_datasets (--flashrag_subset).",
     )
-    parser.add_argument(
-        "--local_dir",
-        default="~/data/searchR1_processed_direct",
-        help="Local directory to save the processed Parquet files.",
-    )
-    parser.add_argument("--hdfs_dir", default=None, help="Optional HDFS directory to copy the Parquet files to.")
+    parser.add_argument("--flashrag_subset", default="nq", help="Subset when dataset_source=flashrag (e.g. nq, hotpotqa).")
+    parser.add_argument("--hf_repo_id", default="PeterJinGo/nq_hotpotqa_train", help="HuggingFace dataset repo ID.")
+    parser.add_argument("--local_dir", default="~/data/searchR1_processed_direct", help="Output directory.")
+    parser.add_argument("--hdfs_dir", default=None, help="Optional HDFS copy destination.")
 
     args = parser.parse_args()
-
-    # System and user content configuration
-    system_content = DEFAULT_SYSTEM_CONTENT
-    user_content_prefix = DEFAULT_USER_CONTENT_PREFIX
-
-    main()
+    main(args, DEFAULT_SYSTEM_CONTENT, DEFAULT_USER_CONTENT_PREFIX)

@@ -413,9 +413,20 @@ class ToolAgentLoop(AgentLoopBase):
         """Call tool and return tool response."""
         tool, instance_id = None, None
         try:
-            # TODO: append malformed tool_call to the prompt: invalid function name or arguments
             tool_name = tool_call.name
             tool_args = json.loads(tool_call.arguments)
+
+            if tool_name == "__malformed_tool_call__":
+                raw = tool_args.get("raw", "")
+                available = list(self.tools.keys())
+                error_msg = (
+                    f"Tool call format error. Expected JSON inside <tool_call> tags, for example: "
+                    f'<tool_call>{{"name": "{available[0] if available else "search"}", '
+                    f'"arguments": {{"query_list": ["your query"]}}}}</tool_call>. '
+                    f"Got: <tool_call>{raw}</tool_call>"
+                )
+                return ToolResponse(text=error_msg), 0.0, {}
+
             tool = self.tools[tool_name]
             kwargs = tools_kwargs.get(tool_name, {})
             instance_id, _ = await tool.create(create_kwargs=kwargs.get("create_kwargs", {}))

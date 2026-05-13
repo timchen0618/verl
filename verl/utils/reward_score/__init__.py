@@ -97,6 +97,7 @@ def default_compute_score(
         "searchR1_hotpotqa",
         "searchR1_2wikimultihopqa",
         "searchR1_musique",
+        "searchR1_flashrag_musique",
         "searchR1_bamboogle",
         "musique",
         "qampari",

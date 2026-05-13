@@ -5,18 +5,23 @@ set -x
 
 ulimit -n 65535
 
+# Enable search/retrieval logging (url, payload, outputs). Use DEBUG for full API response.
+export VERL_LOGGING_LEVEL="${VERL_LOGGING_LEVEL:-INFO}"
+# Unbuffered stdout so logs appear in real time (helps with sbatch output)
+export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
+
 PROJECT_DIR="$(pwd)"
 CONFIG_PATH="$PROJECT_DIR/examples/sglang_multiturn/config"
 
 
-TRAIN_DATA="/scratch/hc3337/projects/Search-R1/data/musique/train_base.parquet"
-VAL_DATA="/scratch/hc3337/projects/Search-R1/data/musique/test_base.parquet"
+TRAIN_DATA="data/musique/train.parquet"
+VAL_DATA="data/musique/dev_500.parquet"
 
 TOOL_CONFIG="$CONFIG_PATH/tool_config/search_tool_config.yaml"
 
 MAX_TURNS=5
 NUM_GPUS_PER_NODE=2
-NUM_EPOCHS=15
+NUM_EPOCHS=5
 GPU_MEMORY_UTILIZATION=0.8
 
 EXP_NAME="musique_qwen2.5-3b-instruct_${MAX_TURNS}turns"
@@ -67,5 +72,8 @@ python3 -m verl.trainer.main_ppo \
     data.train_files="$TRAIN_DATA" \
     data.val_files="$VAL_DATA"  \
     actor_rollout_ref.rollout.multi_turn.tool_config_path="$TOOL_CONFIG" \
-    trainer.total_epochs=$NUM_EPOCHS $@ 
+    actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
+    trainer.total_epochs=$NUM_EPOCHS \
+    ray_kwargs.ray_init.num_cpus=16 \
+    $@
 

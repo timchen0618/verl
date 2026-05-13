@@ -490,4 +490,79 @@ def apply_monkey_patch(
             flash_attention._flash_attention_forward = _ulysses_flash_attention_forward
             print(f"Monkey patch _flash_attention_forward in {flash_attention.__name__}")
 
+    # Workaround for transformers 5.6.0 bug: flash_attention_forward unconditionally
+    # calls s_aux.to(query.dtype) even when s_aux=None (models that don't use attention
+    # sinks always pass s_aux=None, causing AttributeError).
+    try:
+        import inspect
+        from transformers.integrations import flash_attention as _fa_mod
+
+        if "s_aux.to(" in inspect.getsource(_fa_mod.flash_attention_forward):
+            from transformers.integrations.flash_attention import get_target_dtype, _use_top_left_mask
+            from transformers.modeling_flash_attention_utils import _flash_attention_forward as _inner_fa_fwd
+
+            def _flash_attention_forward_s_aux_fix(
+                module,
+                query,
+                key,
+                value,
+                attention_mask,
+                dropout=0.0,
+                scaling=None,
+                sliding_window=None,
+                softcap=None,
+                is_causal=None,
+                s_aux=None,
+                **kwargs,
+            ):
+                if kwargs.get("output_attentions", False):
+                    from transformers.utils import logging as _hf_logging
+                    _hf_logging.get_logger(__name__).warning_once(
+                        "Flash Attention does not support `output_attentions=True`."
+                        " Please set your attention to `eager` if you want any of these features."
+                    )
+                seq_len = query.shape[2]
+                if any(dim == 0 for dim in query.shape):
+                    raise ValueError(
+                        "Tensor query has shape with a zero dimension.\n"
+                        "FlashAttention does not support inputs with dim=0.\n"
+                        "Please check your input shapes or use SDPA instead."
+                    )
+                query = query.transpose(1, 2)
+                key = key.transpose(1, 2)
+                value = value.transpose(1, 2)
+                target_dtype = get_target_dtype(query, module)
+                is_causal = is_causal if is_causal is not None else module.is_causal
+                attn_output = _fa_mod._flash_attention_forward(
+                    query, key, value, attention_mask,
+                    query_length=seq_len,
+                    is_causal=is_causal,
+                    dropout=dropout,
+                    softmax_scale=scaling,
+                    sliding_window=sliding_window,
+                    softcap=softcap,
+                    use_top_left_mask=_use_top_left_mask,
+                    target_dtype=target_dtype,
+                    attn_implementation=module.config._attn_implementation,
+                    layer_idx=module.layer_idx if hasattr(module, "layer_idx") else None,
+                    s_aux=s_aux.to(query.dtype) if s_aux is not None else None,
+                    **kwargs,
+                )
+                return attn_output, None
+
+            _fa_mod.flash_attention_forward = _flash_attention_forward_s_aux_fix
+            # Also update ALL_ATTENTION_FUNCTIONS registry — it holds direct references to the
+            # original function object, not a module lookup, so patching the module attr alone
+            # is not enough.
+            try:
+                from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
+                for key in list(ALL_ATTENTION_FUNCTIONS._global_mapping.keys()):
+                    if ALL_ATTENTION_FUNCTIONS._global_mapping[key].__name__ == "flash_attention_forward":
+                        ALL_ATTENTION_FUNCTIONS._global_mapping[key] = _flash_attention_forward_s_aux_fix
+            except Exception:
+                pass
+            print("Monkey patch flash_attention_forward (s_aux=None fix for transformers 5.6.0)")
+    except Exception:
+        pass
+
     patch_forward_with_backends(model, use_fused_kernels=use_fused_kernels, fused_kernels_backend=fused_kernels_backend)

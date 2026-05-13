@@ -68,7 +68,12 @@ def call_search_api(
     for attempt in range(MAX_RETRIES):
         try:
             logger.info(
-                f"{log_prefix}Attempt {attempt + 1}/{MAX_RETRIES}: Calling search API at {retrieval_service_url}"
+                "%sAttempt %s/%s: retrieval_url=%s payload=%s",
+                log_prefix,
+                attempt + 1,
+                MAX_RETRIES,
+                retrieval_service_url,
+                json.dumps(payload, ensure_ascii=False),
             )
             response = requests.post(
                 retrieval_service_url,
@@ -138,26 +143,12 @@ def call_search_api(
 
 
 def _passages2string(retrieval_result):
-    """Convert retrieval results to formatted string.
-
-    Supports multiple document formats:
-    - document.contents (title\\ntext, used by Search-R1 BM25 and wiki-18)
-    - document.text + document.title
-    - document with contents at top level
-    """
+    """Convert retrieval results to formatted string."""
     format_reference = ""
     for idx, doc_item in enumerate(retrieval_result):
-        doc = doc_item.get("document", doc_item)
-        content = doc.get("contents") or doc.get("text")
-        if content is None:
-            content = str(doc)
-        if isinstance(content, str):
-            parts = content.split("\n", 1)
-            title = parts[0].strip('"') if parts else ""
-            text = parts[1] if len(parts) > 1 else content
-        else:
-            title = doc.get("title", "")
-            text = str(content)
+        content = doc_item["document"]["contents"]
+        title = content.split("\n")[0]
+        text = "\n".join(content.split("\n")[1:])
         format_reference += f"Doc {idx + 1} (Title: {title})\n{text}\n\n"
     return format_reference.strip()
 
@@ -248,7 +239,16 @@ def perform_single_search_batch(
                 metadata["status"] = "success"
                 metadata["total_results"] = total_results
                 metadata["formatted_result"] = final_result
-                logger.info(f"Batch search: Successful, got {total_results} total results")
+                preview_len = 400
+                result_preview = (
+                    final_result[:preview_len] + "..." if len(final_result) > preview_len else final_result
+                )
+                # Use WARNING so it's visible even when root logger is WARNING (INFO is filtered) or in Ray worker logs
+                logger.warning(
+                    "Batch search: Successful, got %s total results. output_preview=%s",
+                    total_results,
+                    result_preview,
+                )
             else:
                 result_text = json.dumps({"result": "No search results found."}, ensure_ascii=False)
                 metadata["status"] = "no_results"

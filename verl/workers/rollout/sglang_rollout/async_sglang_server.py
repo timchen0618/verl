@@ -25,13 +25,15 @@ import sglang.srt.entrypoints.engine
 import torch
 from packaging import version
 from ray.actor import ActorHandle
+from sglang.srt.entrypoints.engine import Engine as _SglangEngine
 from sglang.srt.entrypoints.http_server import (
     ServerArgs,
     _GlobalState,
-    _launch_subprocesses,
     app,
     set_global_state,
 )
+
+_launch_subprocesses = _SglangEngine._launch_subprocesses
 from sglang.srt.managers.io_struct import (
     ContinueGenerationReqInput,
     GenerateReqInput,

@@ -380,6 +380,8 @@ class AgentLoopWorker:
         self.tokenizer = self.model_config.tokenizer
         self.processor = self.model_config.processor
 
+        self._agent_loop_cache: dict[str, AgentLoopBase] = {}
+
         agent_loop_config_path = self.rollout_config.agent.agent_loop_config_path
         if agent_loop_config_path:
             resolved_path = resolve_config_path(agent_loop_config_path)

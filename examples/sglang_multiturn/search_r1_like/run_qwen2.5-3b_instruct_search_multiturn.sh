@@ -5,17 +5,21 @@ set -x
 
 ulimit -n 65535
 
+# Enable search/retrieval logging (url, payload, outputs). Use DEBUG for full API response.
+export VERL_LOGGING_LEVEL="${VERL_LOGGING_LEVEL:-INFO}"
+export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
+
 PROJECT_DIR="$(pwd)"
 CONFIG_PATH="$PROJECT_DIR/examples/sglang_multiturn/config"
 
 
-TRAIN_DATA="data/searchR1_processed_direct/train.parquet"
-VAL_DATA="data/searchR1_processed_direct/test.parquet"
+TRAIN_DATA="data/searchr1_new/train.parquet"
+VAL_DATA="data/searchr1_new/test.parquet"
 
 TOOL_CONFIG="$CONFIG_PATH/tool_config/search_tool_config.yaml"
 
 MAX_TURNS=2
-NUM_GPUS_PER_NODE=4
+NUM_GPUS_PER_NODE=2
 NUM_EPOCHS=1
 GPU_MEMORY_UTILIZATION=0.8
 
@@ -51,7 +55,9 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.name=sglang \
     actor_rollout_ref.rollout.gpu_memory_utilization=$GPU_MEMORY_UTILIZATION \
     actor_rollout_ref.rollout.n=5 \
+    actor_rollout_ref.rollout.dtype=bfloat16 \
     actor_rollout_ref.rollout.multi_turn.max_assistant_turns=$MAX_TURNS \
+    actor_rollout_ref.rollout.agent.default_agent_loop=tool_agent \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=8 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.use_kl_in_reward=False \
